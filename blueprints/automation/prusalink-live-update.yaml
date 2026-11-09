@@ -24,11 +24,12 @@ blueprint:
           domain: sensor
           integration: prusalink
     notify_device:
-      name: Mobile device
-      description: The Home Assistant Companion App device that shows the Live Activity / Live Update.
+      name: Mobile devices
+      description: The Home Assistant Companion App devices that show the Live Activity / Live Update.
       selector:
         device:
           integration: mobile_app
+          multiple: true
     print_tag_helper:
       name: Print tag helper
       description: >
@@ -43,7 +44,13 @@ variables:
   progress_entity: !input progress
   tag_helper: !input print_tag_helper
   notify_device: !input notify_device
-  notify_action: "notify.mobile_app_{{ device_attr(notify_device, 'name') | slugify }}"
+  notify_actions: >-
+    {% set devices = [notify_device] if notify_device is string else notify_device %}
+    {% set ns = namespace(actions=[]) %}
+    {% for device in devices %}
+    {% set ns.actions = ns.actions + ['notify.mobile_app_' ~ (device_attr(device, 'name') | slugify)] %}
+    {% endfor %}
+    {{ ns.actions }}
   base_tag: "{{ (printer | replace('sensor.', '')) ~ '_print' }}"
   stored_tag: >-
     {% set tag = states(tag_helper) %}
@@ -133,45 +140,54 @@ actions:
               - condition: template
                 value_template: "{{ not resumed and stored_tag != '' }}"
             then:
-              - action: "{{ notify_action }}"
-                data:
-                  message: clear_notification
+              - repeat:
+                  for_each: "{{ notify_actions }}"
+                  sequence:
+                    - action: "{{ repeat.item }}"
+                      data:
+                        message: clear_notification
+                        data:
+                          tag: "{{ stored_tag }}"
+          - repeat:
+              for_each: "{{ notify_actions }}"
+              sequence:
+                - action: "{{ repeat.item }}"
                   data:
-                    tag: "{{ stored_tag }}"
-          - action: "{{ notify_action }}"
-            data:
-              title: PrusaLink print
-              message: >-
-                {{ 'Started printing ' + filename if filename not in ['unknown', 'unavailable', 'none', ''] else 'Started printing' }}
-              data:
-                tag: "{{ activity_tag }}"
-                live_update: true
-                progress: "{{ progress_pct }}"
-                progress_max: 100
-                notification_icon: mdi:printer-3d-nozzle
-                notification_icon_color: '#FF6900'
-                color: '#FF6900'
-                silent: true
-                alert_once: true
+                    title: PrusaLink print
+                    message: >-
+                      {{ 'Started printing ' + filename if filename not in ['unknown', 'unavailable', 'none', ''] else 'Started printing' }}
+                    data:
+                      tag: "{{ activity_tag }}"
+                      live_update: true
+                      progress: "{{ progress_pct }}"
+                      progress_max: 100
+                      notification_icon: mdi:printer-3d-nozzle
+                      notification_icon_color: '#FF6900'
+                      color: '#FF6900'
+                      silent: true
+                      alert_once: true
       - conditions:
           - condition: trigger
             id: paused
         sequence:
-          - action: "{{ notify_action }}"
-            data:
-              title: PrusaLink print
-              message: "Paused at {{ progress_pct }}%"
-              data:
-                tag: "{{ activity_tag }}"
-                live_update: true
-                progress: "{{ progress_pct }}"
-                progress_max: 100
-                chronometer: false
-                notification_icon: mdi:pause-circle-outline
-                notification_icon_color: '#FFC107'
-                color: '#FFC107'
-                silent: true
-                alert_once: true
+          - repeat:
+              for_each: "{{ notify_actions }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    title: PrusaLink print
+                    message: "Paused at {{ progress_pct }}%"
+                    data:
+                      tag: "{{ activity_tag }}"
+                      live_update: true
+                      progress: "{{ progress_pct }}"
+                      progress_max: 100
+                      chronometer: false
+                      notification_icon: mdi:pause-circle-outline
+                      notification_icon_color: '#FFC107'
+                      color: '#FFC107'
+                      silent: true
+                      alert_once: true
       - conditions:
           - condition: trigger
             id: progress
@@ -185,131 +201,167 @@ actions:
               - condition: template
                 value_template: "{{ states(printer ~ '_print_finish') not in ['unknown', 'unavailable', 'none', ''] }}"
             then:
-              - action: "{{ notify_action }}"
-                data:
-                  title: PrusaLink print
-                  message: >-
-                    {{ (filename if filename not in ['unknown', 'unavailable', 'none', ''] else 'Printing') + ' · ' + progress_pct|string + '%' }}
-                  data:
-                    tag: "{{ activity_tag }}"
-                    live_update: true
-                    progress: "{{ progress_pct }}"
-                    progress_max: 100
-                    chronometer: true
-                    when: "{{ print_finish_ts }}"
-                    notification_icon: mdi:printer-3d-nozzle
-                    notification_icon_color: '#FF6900'
-                    color: '#FF6900'
-                    silent: true
-                    alert_once: true
+              - repeat:
+                  for_each: "{{ notify_actions }}"
+                  sequence:
+                    - action: "{{ repeat.item }}"
+                      data:
+                        title: PrusaLink print
+                        message: >-
+                          {{ (filename if filename not in ['unknown', 'unavailable', 'none', ''] else 'Printing') + ' · ' + progress_pct|string + '%' }}
+                        data:
+                          tag: "{{ activity_tag }}"
+                          live_update: true
+                          progress: "{{ progress_pct }}"
+                          progress_max: 100
+                          chronometer: true
+                          when: "{{ print_finish_ts }}"
+                          notification_icon: mdi:printer-3d-nozzle
+                          notification_icon_color: '#FF6900'
+                          color: '#FF6900'
+                          silent: true
+                          alert_once: true
             else:
-              - action: "{{ notify_action }}"
-                data:
-                  title: PrusaLink print
-                  message: >-
-                    {{ (filename if filename not in ['unknown', 'unavailable', 'none', ''] else 'Printing') + ' · ' + progress_pct|string + '%' }}
-                  data:
-                    tag: "{{ activity_tag }}"
-                    live_update: true
-                    progress: "{{ progress_pct }}"
-                    progress_max: 100
-                    chronometer: false
-                    notification_icon: mdi:printer-3d-nozzle
-                    notification_icon_color: '#FF6900'
-                    color: '#FF6900'
-                    silent: true
-                    alert_once: true
+              - repeat:
+                  for_each: "{{ notify_actions }}"
+                  sequence:
+                    - action: "{{ repeat.item }}"
+                      data:
+                        title: PrusaLink print
+                        message: >-
+                          {{ (filename if filename not in ['unknown', 'unavailable', 'none', ''] else 'Printing') + ' · ' + progress_pct|string + '%' }}
+                        data:
+                          tag: "{{ activity_tag }}"
+                          live_update: true
+                          progress: "{{ progress_pct }}"
+                          progress_max: 100
+                          chronometer: false
+                          notification_icon: mdi:printer-3d-nozzle
+                          notification_icon_color: '#FF6900'
+                          color: '#FF6900'
+                          silent: true
+                          alert_once: true
       - conditions:
           - condition: trigger
             id: finished
         sequence:
-          - action: "{{ notify_action }}"
-            data:
-              message: clear_notification
-              data:
-                tag: "{{ activity_tag }}"
-          - action: "{{ notify_action }}"
-            data:
-              title: PrusaLink print
-              message: >-
-                {{ 'Print complete · ' + filename if filename not in ['unknown', 'unavailable', 'none', ''] else 'Print complete' }}
-              data:
-                tag: "{{ base_tag ~ '_result' }}"
-                notification_icon: mdi:check-circle-outline
-                notification_icon_color: '#4CAF50'
-                color: '#4CAF50'
+          - repeat:
+              for_each: "{{ notify_actions }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    message: clear_notification
+                    data:
+                      tag: "{{ activity_tag }}"
+          - repeat:
+              for_each: "{{ notify_actions }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    title: PrusaLink print
+                    message: >-
+                      {{ 'Print complete · ' + filename if filename not in ['unknown', 'unavailable', 'none', ''] else 'Print complete' }}
+                    data:
+                      tag: "{{ base_tag ~ '_result' }}"
+                      notification_icon: mdi:check-circle-outline
+                      notification_icon_color: '#4CAF50'
+                      color: '#4CAF50'
       - conditions:
           - condition: trigger
             id: stopped
         sequence:
-          - action: "{{ notify_action }}"
-            data:
-              message: clear_notification
-              data:
-                tag: "{{ activity_tag }}"
-          - action: "{{ notify_action }}"
-            data:
-              title: PrusaLink print
-              message: Print stopped
-              data:
-                tag: "{{ base_tag ~ '_result' }}"
-                notification_icon: mdi:stop-circle-outline
-                notification_icon_color: '#F44336'
-                color: '#F44336'
+          - repeat:
+              for_each: "{{ notify_actions }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    message: clear_notification
+                    data:
+                      tag: "{{ activity_tag }}"
+          - repeat:
+              for_each: "{{ notify_actions }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    title: PrusaLink print
+                    message: Print stopped
+                    data:
+                      tag: "{{ base_tag ~ '_result' }}"
+                      notification_icon: mdi:stop-circle-outline
+                      notification_icon_color: '#F44336'
+                      color: '#F44336'
       - conditions:
           - condition: trigger
             id: error
         sequence:
-          - action: "{{ notify_action }}"
-            data:
-              message: clear_notification
-              data:
-                tag: "{{ activity_tag }}"
-          - action: "{{ notify_action }}"
-            data:
-              title: PrusaLink print
-              message: >-
-                {{ 'Printer error' if printer_state == 'error' else 'Printer needs attention' }}
-              data:
-                tag: "{{ base_tag ~ '_result' }}"
-                notification_icon: mdi:alert-circle-outline
-                notification_icon_color: '#F44336'
-                color: '#F44336'
+          - repeat:
+              for_each: "{{ notify_actions }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    message: clear_notification
+                    data:
+                      tag: "{{ activity_tag }}"
+          - repeat:
+              for_each: "{{ notify_actions }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    title: PrusaLink print
+                    message: >-
+                      {{ 'Printer error' if printer_state == 'error' else 'Printer needs attention' }}
+                    data:
+                      tag: "{{ base_tag ~ '_result' }}"
+                      notification_icon: mdi:alert-circle-outline
+                      notification_icon_color: '#F44336'
+                      color: '#F44336'
       - conditions:
           - condition: trigger
             id: offline
         sequence:
-          - action: "{{ notify_action }}"
-            data:
-              message: clear_notification
-              data:
-                tag: "{{ activity_tag }}"
-          - action: "{{ notify_action }}"
-            data:
-              title: PrusaLink print
-              message: Printer offline
-              data:
-                tag: "{{ base_tag ~ '_result' }}"
-                notification_icon: mdi:cloud-off-outline
-                notification_icon_color: '#9E9E9E'
-                color: '#9E9E9E'
+          - repeat:
+              for_each: "{{ notify_actions }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    message: clear_notification
+                    data:
+                      tag: "{{ activity_tag }}"
+          - repeat:
+              for_each: "{{ notify_actions }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    title: PrusaLink print
+                    message: Printer offline
+                    data:
+                      tag: "{{ base_tag ~ '_result' }}"
+                      notification_icon: mdi:cloud-off-outline
+                      notification_icon_color: '#9E9E9E'
+                      color: '#9E9E9E'
       - conditions:
           - condition: trigger
             id: cancelled_via_idle
         sequence:
-          - action: "{{ notify_action }}"
-            data:
-              message: clear_notification
-              data:
-                tag: "{{ activity_tag }}"
-          - action: "{{ notify_action }}"
-            data:
-              title: PrusaLink print
-              message: Print canceled
-              data:
-                tag: "{{ base_tag ~ '_result' }}"
-                notification_icon: mdi:cancel
-                notification_icon_color: '#F44336'
-                color: '#F44336'
+          - repeat:
+              for_each: "{{ notify_actions }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    message: clear_notification
+                    data:
+                      tag: "{{ activity_tag }}"
+          - repeat:
+              for_each: "{{ notify_actions }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    title: PrusaLink print
+                    message: Print canceled
+                    data:
+                      tag: "{{ base_tag ~ '_result' }}"
+                      notification_icon: mdi:cancel
+                      notification_icon_color: '#F44336'
+                      color: '#F44336'
 mode: queued
 max: 10
