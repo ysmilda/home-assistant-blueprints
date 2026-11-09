@@ -1,0 +1,107 @@
+blueprint:
+  name: Device error notification
+  description: >
+    Sends a notification when any of the selected error sensors reports an
+    error, reading "{Device name} has gone into error state: {error code}".
+    One automation watches every selected sensor; each sensor gets its own
+    notification tag so a newer error replaces the previous one for that
+    device. Optionally clears the notification once the error resolves.
+  domain: automation
+  source_url: https://github.com/ysmilda/home-assistant-blueprints/blob/main/blueprints/automation/device-error-notification.yaml
+  input:
+    error_sensors:
+      name: Error sensors
+      description: Sensors that report an error code or error state, one or more per device.
+      selector:
+        entity:
+          domain: sensor
+          multiple: true
+    ok_states:
+      name: No-error states
+      description: >
+        States that mean "no error". Compared case-insensitively. Any other
+        state (except unavailable/unknown) is treated as an error.
+      default:
+        - ''
+        - none
+        - no_error
+        - no error
+        - ok
+        - normal
+        - '0'
+      selector:
+        text:
+          multiple: true
+    error_for:
+      name: Minimum duration
+      description: How long the error must persist before notifying. Filters out short glitches.
+      default:
+        seconds: 0
+      selector:
+        duration: {}
+    notify_action:
+      name: Notify action
+      description: Notify action to call, for example notify.mobile_app_<your_device>.
+      selector:
+        text: {}
+    title:
+      name: Title
+      description: Notification title.
+      default: Device error
+      selector:
+        text: {}
+    clear_on_recovery:
+      name: Clear when resolved
+      description: Clear the notification when the sensor returns to a no-error state.
+      default: true
+      selector:
+        boolean: {}
+variables:
+  ok_states_input: !input ok_states
+  clear_on_recovery: !input clear_on_recovery
+  notification_title: !input title
+  ok_states: "{{ ok_states_input | map('lower') | list }}"
+  is_error: "{{ trigger.to_state.state | lower not in ok_states }}"
+  was_error: "{{ trigger.from_state.state | lower not in ok_states }}"
+  error_code: "{{ trigger.to_state.state }}"
+  device_name: >-
+    {% set dev = device_id(trigger.entity_id) %}
+    {{ device_attr(dev, 'name_by_user') or device_attr(dev, 'name')
+       or trigger.to_state.name }}
+  notification_tag: "{{ (trigger.entity_id | replace('.', '_')) ~ '_error' }}"
+triggers:
+  - trigger: state
+    entity_id: !input error_sensors
+    not_from:
+      - unavailable
+      - unknown
+    not_to:
+      - unavailable
+      - unknown
+    for: !input error_for
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ is_error }}"
+        sequence:
+          - action: !input notify_action
+            data:
+              title: "{{ notification_title }}"
+              message: "{{ device_name }} has gone into error state: {{ error_code }}"
+              data:
+                tag: "{{ notification_tag }}"
+                group: device_errors
+                notification_icon: mdi:alert-circle-outline
+                color: '#F44336'
+      - conditions:
+          - condition: template
+            value_template: "{{ clear_on_recovery and was_error }}"
+        sequence:
+          - action: !input notify_action
+            data:
+              message: clear_notification
+              data:
+                tag: "{{ notification_tag }}"
+mode: parallel
+max: 10
