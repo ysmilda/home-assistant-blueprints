@@ -59,6 +59,8 @@ variables:
   printer_state: "{{ states(printer) }}"
   progress_pct: "{{ states(progress_entity) | int(0) }}"
   filename: "{{ states(printer ~ '_filename') }}"
+  notification_title: >-
+    {{ filename if filename not in ['unknown', 'unavailable', 'none', ''] else 'PrusaLink print' }}
   print_finish_ts: >-
     {% set raw = states(printer ~ '_print_finish') %}
     {% if raw in ['unknown', 'unavailable', 'none', ''] %}
@@ -153,9 +155,8 @@ actions:
               sequence:
                 - action: "{{ repeat.item }}"
                   data:
-                    title: PrusaLink print
-                    message: >-
-                      {{ 'Started printing ' + filename if filename not in ['unknown', 'unavailable', 'none', ''] else 'Started printing' }}
+                    title: "{{ notification_title }}"
+                    message: Started printing
                     data:
                       tag: "{{ activity_tag }}"
                       live_update: true
@@ -175,7 +176,7 @@ actions:
               sequence:
                 - action: "{{ repeat.item }}"
                   data:
-                    title: PrusaLink print
+                    title: "{{ notification_title }}"
                     message: "Paused at {{ progress_pct }}%"
                     data:
                       tag: "{{ activity_tag }}"
@@ -206,9 +207,8 @@ actions:
                   sequence:
                     - action: "{{ repeat.item }}"
                       data:
-                        title: PrusaLink print
-                        message: >-
-                          {{ (filename if filename not in ['unknown', 'unavailable', 'none', ''] else 'Printing') + ' · ' + progress_pct|string + '%' }}
+                        title: "{{ notification_title }}"
+                        message: "Printing · {{ progress_pct }}%"
                         data:
                           tag: "{{ activity_tag }}"
                           live_update: true
@@ -227,9 +227,8 @@ actions:
                   sequence:
                     - action: "{{ repeat.item }}"
                       data:
-                        title: PrusaLink print
-                        message: >-
-                          {{ (filename if filename not in ['unknown', 'unavailable', 'none', ''] else 'Printing') + ' · ' + progress_pct|string + '%' }}
+                        title: "{{ notification_title }}"
+                        message: "Printing · {{ progress_pct }}%"
                         data:
                           tag: "{{ activity_tag }}"
                           live_update: true
@@ -258,9 +257,8 @@ actions:
               sequence:
                 - action: "{{ repeat.item }}"
                   data:
-                    title: PrusaLink print
-                    message: >-
-                      {{ 'Print complete · ' + filename if filename not in ['unknown', 'unavailable', 'none', ''] else 'Print complete' }}
+                    title: "{{ notification_title }}"
+                    message: Print complete
                     data:
                       tag: "{{ base_tag ~ '_result' }}"
                       notification_icon: mdi:check-circle-outline
@@ -283,7 +281,7 @@ actions:
               sequence:
                 - action: "{{ repeat.item }}"
                   data:
-                    title: PrusaLink print
+                    title: "{{ notification_title }}"
                     message: Print stopped
                     data:
                       tag: "{{ base_tag ~ '_result' }}"
@@ -307,7 +305,7 @@ actions:
               sequence:
                 - action: "{{ repeat.item }}"
                   data:
-                    title: PrusaLink print
+                    title: "{{ notification_title }}"
                     message: >-
                       {{ 'Printer error' if printer_state == 'error' else 'Printer needs attention' }}
                     data:
@@ -332,7 +330,7 @@ actions:
               sequence:
                 - action: "{{ repeat.item }}"
                   data:
-                    title: PrusaLink print
+                    title: "{{ notification_title }}"
                     message: Printer offline
                     data:
                       tag: "{{ base_tag ~ '_result' }}"
@@ -356,7 +354,7 @@ actions:
               sequence:
                 - action: "{{ repeat.item }}"
                   data:
-                    title: PrusaLink print
+                    title: "{{ notification_title }}"
                     message: Print canceled
                     data:
                       tag: "{{ base_tag ~ '_result' }}"
