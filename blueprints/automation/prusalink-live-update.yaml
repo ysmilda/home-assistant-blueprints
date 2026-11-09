@@ -39,11 +39,22 @@ blueprint:
       selector:
         entity:
           domain: input_text
+    notification_url:
+      name: Notification link
+      description: >
+        Page to open when a notification is tapped. Use a Home Assistant path
+        such as /lovelace/3d-printer or a full URL such as
+        http://prusa-mk4.local. Leave empty to open the default dashboard.
+      default: ''
+      selector:
+        text: {}
 variables:
   printer: !input printer
   progress_entity: !input progress
   tag_helper: !input print_tag_helper
   notify_device: !input notify_device
+  notification_url: !input notification_url
+  click_url: "{{ notification_url | trim if notification_url | trim else '/' }}"
   notify_actions: >-
     {% set devices = [notify_device] if notify_device is string else notify_device %}
     {% set ns = namespace(actions=[]) %}
@@ -165,6 +176,8 @@ actions:
                       notification_icon: mdi:printer-3d-nozzle
                       notification_icon_color: '#FF6900'
                       color: '#FF6900'
+                      url: "{{ click_url }}"
+                      clickAction: "{{ click_url }}"
                       silent: true
                       alert_once: true
       - conditions:
@@ -187,6 +200,8 @@ actions:
                       notification_icon: mdi:pause-circle-outline
                       notification_icon_color: '#FFC107'
                       color: '#FFC107'
+                      url: "{{ click_url }}"
+                      clickAction: "{{ click_url }}"
                       silent: true
                       alert_once: true
       - conditions:
@@ -219,6 +234,8 @@ actions:
                           notification_icon: mdi:printer-3d-nozzle
                           notification_icon_color: '#FF6900'
                           color: '#FF6900'
+                          url: "{{ click_url }}"
+                          clickAction: "{{ click_url }}"
                           silent: true
                           alert_once: true
             else:
@@ -238,6 +255,8 @@ actions:
                           notification_icon: mdi:printer-3d-nozzle
                           notification_icon_color: '#FF6900'
                           color: '#FF6900'
+                          url: "{{ click_url }}"
+                          clickAction: "{{ click_url }}"
                           silent: true
                           alert_once: true
       - conditions:
@@ -264,6 +283,8 @@ actions:
                       notification_icon: mdi:check-circle-outline
                       notification_icon_color: '#4CAF50'
                       color: '#4CAF50'
+                      url: "{{ click_url }}"
+                      clickAction: "{{ click_url }}"
       - conditions:
           - condition: trigger
             id: stopped
@@ -288,6 +309,8 @@ actions:
                       notification_icon: mdi:stop-circle-outline
                       notification_icon_color: '#F44336'
                       color: '#F44336'
+                      url: "{{ click_url }}"
+                      clickAction: "{{ click_url }}"
       - conditions:
           - condition: trigger
             id: error
@@ -313,6 +336,8 @@ actions:
                       notification_icon: mdi:alert-circle-outline
                       notification_icon_color: '#F44336'
                       color: '#F44336'
+                      url: "{{ click_url }}"
+                      clickAction: "{{ click_url }}"
       - conditions:
           - condition: trigger
             id: offline
@@ -337,6 +362,8 @@ actions:
                       notification_icon: mdi:cloud-off-outline
                       notification_icon_color: '#9E9E9E'
                       color: '#9E9E9E'
+                      url: "{{ click_url }}"
+                      clickAction: "{{ click_url }}"
       - conditions:
           - condition: trigger
             id: cancelled_via_idle
@@ -361,5 +388,7 @@ actions:
                       notification_icon: mdi:cancel
                       notification_icon_color: '#F44336'
                       color: '#F44336'
+                      url: "{{ click_url }}"
+                      clickAction: "{{ click_url }}"
 mode: queued
 max: 10
