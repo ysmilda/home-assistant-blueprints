@@ -3,8 +3,13 @@ blueprint:
   description: >
     Mirrors an in-progress PrusaLink print to a mobile app Live Activity /
     Live Update, tracking progress and ETA and handling pauses, completion,
-    cancellation, errors, and offline states. Progress updates are silent; the
-    final outcome stays as an audible notification.
+    cancellation, errors, and offline states. Progress updates are silent.
+    The final outcome (complete, stopped, canceled, error) updates the same
+    notification with an alert and stays until dismissed: on Android it
+    becomes a regular notification, on iOS the Live Activity keeps its final
+    state. iOS limits Live Activities to about 8 hours, plus up to 4 hours on
+    the Lock Screen after that, so very long prints or an undismissed result
+    are eventually removed by iOS.
   domain: automation
   source_url: https://github.com/ysmilda/home-assistant-blueprints/blob/main/blueprints/automation/prusalink-live-update.yaml
   input:
@@ -55,13 +60,16 @@ variables:
   notify_device: !input notify_device
   notification_url: !input notification_url
   click_url: "{{ notification_url | trim if notification_url | trim else '/' }}"
-  notify_actions: >-
+  notify_targets: >-
     {% set devices = [notify_device] if notify_device is string else notify_device %}
-    {% set ns = namespace(actions=[]) %}
+    {% set ns = namespace(targets=[]) %}
     {% for device in devices %}
-    {% set ns.actions = ns.actions + ['notify.mobile_app_' ~ (device_attr(device, 'name') | slugify)] %}
+    {% set ns.targets = ns.targets + [{
+      'action': 'notify.mobile_app_' ~ (device_attr(device, 'name') | slugify),
+      'apple': device_attr(device, 'manufacturer') == 'Apple'
+    }] %}
     {% endfor %}
-    {{ ns.actions }}
+    {{ ns.targets }}
   base_tag: "{{ (printer | replace('sensor.', '')) ~ '_print' }}"
   stored_tag: >-
     {% set tag = states(tag_helper) %}
@@ -90,6 +98,8 @@ triggers:
     entity_id: !input printer
     from:
       - printing
+      - unavailable
+      - unknown
     to: paused
   - trigger: state
     id: progress
@@ -100,6 +110,8 @@ triggers:
     from:
       - printing
       - paused
+      - unavailable
+      - unknown
     to: finished
   - trigger: state
     id: stopped
@@ -107,6 +119,8 @@ triggers:
     from:
       - printing
       - paused
+      - unavailable
+      - unknown
     to: stopped
   - trigger: state
     id: error
@@ -114,6 +128,8 @@ triggers:
     from:
       - printing
       - paused
+      - unavailable
+      - unknown
     to:
       - error
       - attention
@@ -132,6 +148,8 @@ triggers:
     from:
       - printing
       - paused
+      - unavailable
+      - unknown
     to: idle
 actions:
   - choose:
@@ -141,7 +159,9 @@ actions:
         sequence:
           - variables:
               resumed: >-
-                {{ trigger.from_state is not none and trigger.from_state.state == 'paused' and stored_tag != '' }}
+                {{ trigger.from_state is not none
+                   and trigger.from_state.state in ['paused', 'unavailable', 'unknown']
+                   and stored_tag != '' }}
               activity_tag: >-
                 {{ stored_tag if resumed else base_tag ~ '_' ~ (now() | as_timestamp | int) }}
           - action: input_text.set_value
@@ -149,22 +169,10 @@ actions:
               entity_id: !input print_tag_helper
             data:
               value: "{{ activity_tag }}"
-          - if:
-              - condition: template
-                value_template: "{{ not resumed and stored_tag != '' }}"
-            then:
-              - repeat:
-                  for_each: "{{ notify_actions }}"
-                  sequence:
-                    - action: "{{ repeat.item }}"
-                      data:
-                        message: clear_notification
-                        data:
-                          tag: "{{ stored_tag }}"
           - repeat:
-              for_each: "{{ notify_actions }}"
+              for_each: "{{ notify_targets }}"
               sequence:
-                - action: "{{ repeat.item }}"
+                - action: "{{ repeat.item.action }}"
                   data:
                     title: "{{ notification_title }}"
                     message: Started printing
@@ -185,9 +193,9 @@ actions:
             id: paused
         sequence:
           - repeat:
-              for_each: "{{ notify_actions }}"
+              for_each: "{{ notify_targets }}"
               sequence:
-                - action: "{{ repeat.item }}"
+                - action: "{{ repeat.item.action }}"
                   data:
                     title: "{{ notification_title }}"
                     message: "Paused at {{ progress_pct }}%"
@@ -218,9 +226,9 @@ actions:
                 value_template: "{{ states(printer ~ '_print_finish') not in ['unknown', 'unavailable', 'none', ''] }}"
             then:
               - repeat:
-                  for_each: "{{ notify_actions }}"
+                  for_each: "{{ notify_targets }}"
                   sequence:
-                    - action: "{{ repeat.item }}"
+                    - action: "{{ repeat.item.action }}"
                       data:
                         title: "{{ notification_title }}"
                         message: "Printing · {{ progress_pct }}%"
@@ -240,9 +248,9 @@ actions:
                           alert_once: true
             else:
               - repeat:
-                  for_each: "{{ notify_actions }}"
+                  for_each: "{{ notify_targets }}"
                   sequence:
-                    - action: "{{ repeat.item }}"
+                    - action: "{{ repeat.item.action }}"
                       data:
                         title: "{{ notification_title }}"
                         message: "Printing · {{ progress_pct }}%"
@@ -261,134 +269,80 @@ actions:
                           alert_once: true
       - conditions:
           - condition: trigger
-            id: finished
+            id:
+              - finished
+              - stopped
+              - error
+              - cancelled_via_idle
+          - condition: template
+            value_template: >-
+              {{ trigger.from_state.state in ['printing', 'paused'] or stored_tag != '' }}
         sequence:
+          - variables:
+              final_message: >-
+                {{ {
+                  'finished': 'Print complete',
+                  'stopped': 'Print stopped',
+                  'cancelled_via_idle': 'Print canceled',
+                  'error': 'Printer error' if printer_state == 'error' else 'Printer needs attention'
+                }[trigger.id] }}
+              final_icon: >-
+                {{ {
+                  'finished': 'mdi:check-circle-outline',
+                  'stopped': 'mdi:stop-circle-outline',
+                  'cancelled_via_idle': 'mdi:cancel',
+                  'error': 'mdi:alert-circle-outline'
+                }[trigger.id] }}
+              final_color: "{{ '#4CAF50' if trigger.id == 'finished' else '#F44336' }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input print_tag_helper
+            data:
+              value: ''
           - repeat:
-              for_each: "{{ notify_actions }}"
+              for_each: "{{ notify_targets }}"
               sequence:
-                - action: "{{ repeat.item }}"
-                  data:
-                    message: clear_notification
-                    data:
-                      tag: "{{ activity_tag }}"
-          - repeat:
-              for_each: "{{ notify_actions }}"
-              sequence:
-                - action: "{{ repeat.item }}"
+                - action: "{{ repeat.item.action }}"
                   data:
                     title: "{{ notification_title }}"
-                    message: Print complete
-                    data:
-                      tag: "{{ base_tag ~ '_result' }}"
-                      notification_icon: mdi:check-circle-outline
-                      notification_icon_color: '#4CAF50'
-                      color: '#4CAF50'
-                      url: "{{ click_url }}"
-                      clickAction: "{{ click_url }}"
-      - conditions:
-          - condition: trigger
-            id: stopped
-        sequence:
-          - repeat:
-              for_each: "{{ notify_actions }}"
-              sequence:
-                - action: "{{ repeat.item }}"
-                  data:
-                    message: clear_notification
-                    data:
-                      tag: "{{ activity_tag }}"
-          - repeat:
-              for_each: "{{ notify_actions }}"
-              sequence:
-                - action: "{{ repeat.item }}"
-                  data:
-                    title: "{{ notification_title }}"
-                    message: Print stopped
-                    data:
-                      tag: "{{ base_tag ~ '_result' }}"
-                      notification_icon: mdi:stop-circle-outline
-                      notification_icon_color: '#F44336'
-                      color: '#F44336'
-                      url: "{{ click_url }}"
-                      clickAction: "{{ click_url }}"
-      - conditions:
-          - condition: trigger
-            id: error
-        sequence:
-          - repeat:
-              for_each: "{{ notify_actions }}"
-              sequence:
-                - action: "{{ repeat.item }}"
-                  data:
-                    message: clear_notification
-                    data:
-                      tag: "{{ activity_tag }}"
-          - repeat:
-              for_each: "{{ notify_actions }}"
-              sequence:
-                - action: "{{ repeat.item }}"
-                  data:
-                    title: "{{ notification_title }}"
-                    message: >-
-                      {{ 'Printer error' if printer_state == 'error' else 'Printer needs attention' }}
-                    data:
-                      tag: "{{ base_tag ~ '_result' }}"
-                      notification_icon: mdi:alert-circle-outline
-                      notification_icon_color: '#F44336'
-                      color: '#F44336'
-                      url: "{{ click_url }}"
-                      clickAction: "{{ click_url }}"
+                    message: "{{ final_message }}"
+                    data: >-
+                      {% set payload = {
+                        'tag': activity_tag,
+                        'chronometer': false,
+                        'notification_icon': final_icon,
+                        'notification_icon_color': final_color,
+                        'color': final_color,
+                        'url': click_url,
+                        'clickAction': click_url
+                      } %}
+                      {% if trigger.id != 'finished' %}
+                      {% set payload = dict(payload, progress=progress_pct, progress_max=100) %}
+                      {% endif %}
+                      {{ dict(payload, live_update=true) if repeat.item.apple else payload }}
       - conditions:
           - condition: trigger
             id: offline
         sequence:
           - repeat:
-              for_each: "{{ notify_actions }}"
+              for_each: "{{ notify_targets }}"
               sequence:
-                - action: "{{ repeat.item }}"
-                  data:
-                    message: clear_notification
-                    data:
-                      tag: "{{ activity_tag }}"
-          - repeat:
-              for_each: "{{ notify_actions }}"
-              sequence:
-                - action: "{{ repeat.item }}"
+                - action: "{{ repeat.item.action }}"
                   data:
                     title: "{{ notification_title }}"
                     message: Printer offline
                     data:
-                      tag: "{{ base_tag ~ '_result' }}"
+                      tag: "{{ activity_tag }}"
+                      live_update: true
+                      progress: "{{ progress_pct }}"
+                      progress_max: 100
+                      chronometer: false
                       notification_icon: mdi:cloud-off-outline
                       notification_icon_color: '#9E9E9E'
                       color: '#9E9E9E'
                       url: "{{ click_url }}"
                       clickAction: "{{ click_url }}"
-      - conditions:
-          - condition: trigger
-            id: cancelled_via_idle
-        sequence:
-          - repeat:
-              for_each: "{{ notify_actions }}"
-              sequence:
-                - action: "{{ repeat.item }}"
-                  data:
-                    message: clear_notification
-                    data:
-                      tag: "{{ activity_tag }}"
-          - repeat:
-              for_each: "{{ notify_actions }}"
-              sequence:
-                - action: "{{ repeat.item }}"
-                  data:
-                    title: "{{ notification_title }}"
-                    message: Print canceled
-                    data:
-                      tag: "{{ base_tag ~ '_result' }}"
-                      notification_icon: mdi:cancel
-                      notification_icon_color: '#F44336'
-                      color: '#F44336'
-                      url: "{{ click_url }}"
-                      clickAction: "{{ click_url }}"
+                      silent: true
+                      alert_once: true
 mode: queued
 max: 10
